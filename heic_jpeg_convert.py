@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# heic_jpeg_convert.py : HEIC / JPEG vers JPEG, HEIC, JPEG XL et AVIF, avec perte minimale, EXIF et HDR conservés.
+# heic_jpeg_convert.py : HEIC / JPEG / PNG vers JPEG, HEIC, JPEG XL, AVIF et PNG, avec perte minimale, EXIF et HDR conservés.
 # Copyright (C) 2026 DamienLubat
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
@@ -13,15 +13,17 @@
 #
 # You should have received a copy of the GNU General Public License along with this program. If not, see
 # <https://www.gnu.org/licenses/>.
-r"""HEIC ou JPEG -> fichiers convertis avec une perte minimale, EXIF conservé ; HDR conservé quand la source est HDR.
+r"""HEIC, JPEG ou PNG -> fichiers convertis avec une perte minimale, EXIF conservé ; HDR conservé quand la source est HDR.
 
   HEIC / HEIF (.heic .heif)        -> JPEG + JPEG XL + AVIF
   JPEG (.jpg .jpeg .jpe .jfif)     -> HEIC + JPEG XL + AVIF
+  PNG (.png)                       -> JPEG + HEIC + JPEG XL + AVIF
+  (le PNG en sortie n'est jamais un défaut : -f png ; il vaut pour les trois types de source)
 Le type est lu dans le contenu du fichier, pas dans son extension.
 
 Usage : python heic_jpeg_convert.py ["<dossier_source>" ["<dossier_sortie>"]] [-f formats] [-y]
-Sans argument : convertit les HEIC et les JPEG du dossier courant (sous-dossiers exclus).
-Sortie par défaut : <dossier_source>/converti/{jpg,heic,jxl,avif}/  (un dossier par format, créé au besoin)
+Sans argument : convertit les HEIC, les JPEG et les PNG du dossier courant (sous-dossiers exclus).
+Sortie par défaut : <dossier_source>/converti/{jpg,heic,jxl,avif,png}/  (un dossier par format, créé au besoin)
 -f, --formats LISTE : choisit les formats de sortie, voir « Choix des formats » plus bas. -y : confirme d'avance. --aide : aide.
 Prérequis : python -m pip install --upgrade pillow pillow-heif imagecodecs numpy
             (pillow-jxl-plugin : facultatif ; il ajoute une relecture de l'étiquette couleur des JXL SDR, voir README.md)
@@ -35,12 +37,15 @@ Pour une source HDR : les codes PQ calculés depuis l'image SDR + la carte de ga
 Trois préréglages (variable FIDELITE ci-dessous), à taper avec ou sans majuscules.
 
 === Choix des formats de sortie (option -f / --formats, ou réglage FORMATS_SORTIE en tête de programme) ===
-Un ou plusieurs de heic, jpg, jxl, avif, séparés par une virgule (« heif » = heic, « jpeg » = jpg ; « avi » est lu comme « avif »,
-avec un avis : AVI est un format vidéo). Sans choix (« auto ») : HEIC -> jpg, jxl, avif ; JPEG -> heic, jxl, avif, comme avant.
+Un ou plusieurs de heic, jpg, jxl, avif, png, séparés par une virgule (« heif » = heic, « jpeg » = jpg ; « avi » est lu comme « avif »,
+avec un avis : AVI est un format vidéo). Sans choix (« auto ») : HEIC -> jpg, jxl, avif ; JPEG -> heic, jxl, avif ; PNG -> jpg, heic,
+jxl, avif (png n'est jamais produit sans le demander).
 La liste vaut pour tous les fichiers du dossier. L'option remplace le réglage. Exemples :
   python heic_jpeg_convert.py "D:\Photos" -f jxl             JPEG XL seulement
-  python heic_jpeg_convert.py "D:\Photos" -f heic,avif       HEIC (pour les JPEG) et AVIF
-Format identique à la source (heic pour un HEIC, jpg pour un JPEG) : c'est une RECOMPRESSION des pixels décodés, pas une copie.
+  python heic_jpeg_convert.py "D:\Photos" -f heic,avif       HEIC (pour les JPEG et les PNG) et AVIF
+  python heic_jpeg_convert.py "D:\Photos" -f png             PNG (pour les HEIC, les JPEG ; PNG -> PNG sur confirmation)
+Format identique à la source (heic pour un HEIC, jpg pour un JPEG, png pour un PNG) : c'est une RECOMPRESSION des pixels décodés,
+pas une copie (pour un PNG, elle est sans perte : les pixels 8 bits restent identiques).
 Avant de convertir, le programme affiche ce que cela implique et demande « Convertir vraiment N fichier(s) X en X ? [o/N] » (non par
 défaut), une fois par type de source. Refus : seule cette sortie est abandonnée, les autres formats demandés sont produits.
 -y / --yes / --oui répond « oui » d'avance. Sans clavier (entrée redirigée, tâche planifiée) et sans -y, ces sorties sont ignorées,
@@ -99,6 +104,27 @@ Display P3), tailles en multiples du JPEG, ΔE2000 moyen contre le JPEG décodé
          Image unique tant que le flux HEVC tient sous 15 Mo ; au-delà, grille de tuiles de 1024 px (structure des HEIC
          d'iPhone), car le décodeur libde265 de pillow-heif refuse une image unique de plus de 16 Mio (mesuré).
 
+=== PNG en entrée -> jpg, heic, jxl, avif ; PNG en sortie (-f png) ===
+PNG en entrée : RVB, RVBA, gris, gris + alpha, palette, 1 bit ; 8 ou 16 bits par canal. Les sorties jpg, heic, jxl, avif reçoivent
+les pixels 8 bits décodés, avec les réglages du préréglage choisi (comme pour un HEIC ou un JPEG SDR). Un PNG n'a pas de HDR.
+  Transparence : jpg, heic, jxl et avif ne la gardent pas. Elle est aplatie sur le fond PNG_FOND (blanc par défaut) ; signalé,
+  code retour non nul. Un canal alpha entièrement opaque est ignoré sans signalement.
+  16 bits par canal : lu avec imagecodecs puis arrondi à 8 bits (v / 257) ; signalé, code retour non nul. Sans imagecodecs
+  (avec son codec PNG) : refusé, car Pillow lirait un PNG RVB 16 bits en 8 bits sans le dire.
+  PNG animé (APNG) : seule l'image par défaut est convertie ; signalé, code retour non nul.
+  Orientation EXIF (bloc eXIf) : pixels tournés, étiquette 1, comme pour un JPEG. Le traitement de l'orientation EXIF d'un PNG
+  par les visionneuses n'a pas été vérifié.
+  Couleurs : profil ICC (iCCP) recopié (jpg, heic, png) ou converti en étiquette CICP (avif, jxl), comme pour un JPEG ; PNG sans
+  profil : sRGB ; bloc gAMA ignoré (une note s'affiche s'il est loin de sRGB). Étiquette cICP : sRGB (1 / 13) acceptée, autre
+  étiquette SDR traitée comme sRGB (signalé), PQ ou HLG REFUSÉ (PNG HDR non lu : les couleurs seraient fausses).
+PNG en sortie : 8 bits RVB sans perte, relu et comparé pixel pour pixel à la source décodée (identiques) ; profil ICC et EXIF
+  recopiés ; une source PNG transparente garde son alpha (RVBA). Compression zlib : PNG_NIVEAU (6). Non conservés : texte PNG,
+  XMP, résolution (pHYs). Taille : environ 0,26 x le brut non compressé (2 photos d'iPhone de 12 et 24 Mpx : 9,6 et 19 Mo).
+  Photo HDR : PNG_HDR = False (défaut) donne un PNG SDR ; True donne un PNG 16 bits Rec.2020 / PQ (balise cICP 9 / 16 / 0 / 1,
+  mêmes codes PQ 16 bits que le JXL HDR, relus et comparés à l'identique), environ 5 fois plus gros (2 photos de 12 Mpx : 45 à 47 Mo
+  contre 8 à 10 Mo en SDR). Structure relue par FFmpeg 6.1.1 (Rec.2020, SMPTE ST 2084, plage complète) ; affichage
+  en HDR constaté sur un iPhone (app Photos, un seul appareil), non vérifié ailleurs : un lecteur qui ignore cICP affiche des couleurs fausses.
+
 Règle HDR : source HDR -> sorties HDR ; source SDR -> sorties SDR.
   HEIC HDR (iPhone, iOS 18+ : image SDR + carte de gain, item `tmap`) : sorties jpg, avif, jxl HDR.
   JPEG « Ultra HDR » (image SDR + carte de gain monocanal ; métadonnées ISO 21496-1, sinon XMP hdrgm) : sorties heic, avif,
@@ -133,6 +159,7 @@ commande à lancer. Code retour non nul si une conversion échoue, si un format 
 
 Réglages en tête de programme : FIDELITE ; AVIF_444 (False : AVIF toujours en 4:2:0) ; HEIC_444 (False : HEIC Lossless en
 4:2:0 q95) ; HEIC_HDR (False : photo HDR -> HEIC SDR) ; FORMATS_SORTIE ("auto", ou une liste de formats) ;
+PNG_FOND (fond RVB de l'aplatissement d'une transparence) ; PNG_HDR (True : photo HDR -> PNG 16 bits PQ) ; PNG_NIVEAU (compression) ;
 JXL_LOSSY_MIN_SAVING (préréglage Lossy : JXL avec perte gardé s'il est au moins 20 % plus petit que le transcodage) ;
 HDR (False : tout en SDR).
 
@@ -140,12 +167,15 @@ Non conservés : HEIC en entrée : cartes auxiliaires Apple (style, ciel, peau, 
 « Styles photographiques », XMP ; un HEIC 10 bits (hors iPhone) est lu en 8 bits par pillow-heif : signalé.
 JPEG en entrée : XMP, IPTC et commentaires (sauf dans le JXL transcodé, qui restitue le JPEG entier), images secondaires
 d'un fichier MPO (signalé) ; un JPEG CMYK / YCCK est refusé (une conversion en RGB donnerait de fausses couleurs).
+PNG en entrée : texte PNG (tEXt, iTXt, zTXt), XMP, résolution (pHYs), EXIF écrit en texte (« Raw profile type exif », ImageMagick) ;
+animation (APNG) ; transparence (sauf en sortie png) ; précision au-delà de 8 bits (sauf PNG HDR en sortie).
 """
 import math
 import os
 import re
 import struct
 import sys
+import zlib
 from concurrent.futures import ProcessPoolExecutor
 from io import BytesIO
 from pathlib import Path
@@ -167,8 +197,9 @@ try:  # AVIF / JXL 10 bits, 16 bits, sans perte, étiquettes CICP : Pillow ne sa
     import imagecodecs
     import numpy as np
     HAS_HDR_ENC = bool(imagecodecs.AVIF.available and imagecodecs.JPEGXL.available)
+    HAS_PNG16 = bool(imagecodecs.PNG.available)      # PNG 16 bits par canal (lecture, et sortie HDR)
 except ImportError:
-    HAS_HDR_ENC = False
+    HAS_HDR_ENC = HAS_PNG16 = False
 HDR_ENC_HINT = "python -m pip install --upgrade imagecodecs numpy"
 
 # ----------------------------------------------------------------------------------------------
@@ -178,7 +209,10 @@ FIDELITE = "Lossless"                 # "Lossless", "minLossy" ou "Lossy" (voir 
 AVIF_444 = True                       # False : AVIF toujours en 4:2:0 (profil AV1 le plus répandu), dans les trois préréglages
 HEIC_444 = True                       # False : le HEIC « Lossless » (JPEG en entrée) passe en 4:2:0 qualité 95 (profil HEVC le plus répandu)
 HEIC_HDR = True                       # False : un JPEG Ultra HDR donne un HEIC SDR (HEIC 10 bits PQ : affichage constaté sur un iPhone, non vérifié sur macOS / Windows)
-FORMATS_SORTIE = "auto"               # formats de sortie : "auto" (HEIC -> jpg, jxl, avif ; JPEG -> heic, jxl, avif) ou une liste, ex. "heic, jxl" ; l'option -f la remplace
+FORMATS_SORTIE = "auto"               # formats de sortie : "auto" (HEIC -> jpg, jxl, avif ; JPEG -> heic, jxl, avif ; PNG -> jpg, heic, jxl, avif) ou une liste, ex. "heic, jxl" ; l'option -f la remplace
+PNG_FOND = (255, 255, 255)            # PNG avec transparence converti en jpg / heic / jxl / avif : couleur (R, V, B) sur laquelle la transparence est aplatie
+PNG_HDR = False                       # True : une photo HDR donne un PNG 16 bits Rec.2020 / PQ (balise cICP) ; False : PNG SDR (le PNG n'a pas de carte de gain)
+PNG_NIVEAU = 6                        # compression zlib du PNG, de 0 à 9 (9 contre 6, mesuré sur 2 photos d'iPhone de 12 et 24 Mpx : 1 à 2 % plus petit, ~3 fois plus lent)
 JXL_LOSSY_MIN_SAVING = 0.20           # préréglage « Lossy », JPEG -> JXL : JXL avec perte gardé seulement s'il est au moins 20 % plus petit que le transcodage
 HDR = True                            # False : tout convertir en SDR
 HDR_SDR_WHITE_NITS = 203.0            # blanc SDR de référence BT.2408 (valeur utilisée par Apple/Google)
@@ -229,6 +263,11 @@ if str(FIDELITE).lower() not in _PRESET_NAMES:
     sys.exit('FIDELITE doit valoir "Lossless", "minLossy" ou "Lossy" (valeur actuelle : %r)' % (FIDELITE,))
 FIDELITE = _PRESET_NAMES[str(FIDELITE).lower()]
 P = PRESETS[FIDELITE]
+if not (isinstance(PNG_FOND, (tuple, list)) and len(PNG_FOND) == 3 and all(type(v) is int and 0 <= v <= 255 for v in PNG_FOND)):
+    sys.exit("PNG_FOND doit être un triplet (R, V, B) d'entiers de 0 à 255 (valeur actuelle : %r)" % (PNG_FOND,))
+PNG_FOND = tuple(PNG_FOND)
+if type(PNG_NIVEAU) is not int or not 0 <= PNG_NIVEAU <= 9:
+    sys.exit("PNG_NIVEAU doit être un entier de 0 à 9 (valeur actuelle : %r)" % (PNG_NIVEAU,))
 
 def _heic_writable():
     """pillow-heif sait-il ENCODER du HEVC ici ? (la roue Windows embarque x265 ; sans encodeur, l'écriture échoue)"""
@@ -246,18 +285,21 @@ ALL_FORMATS = {
     "heic": ("HEIF", "python -m pip install --upgrade pillow-heif   (encodeur HEVC x265 requis)"),
     "jxl": ("JXL", "python -m pip install --upgrade imagecodecs numpy   (pillow-jxl-plugin, facultatif, sert de repli)"),
     "avif": ("AVIF", "python -m pip install --upgrade pillow imagecodecs numpy   (Pillow >= 11.3 sans imagecodecs)"),
+    "png": ("PNG", "python -m pip install --upgrade pillow"),
 }
 HEIC_OUT = ("jpg", "jxl", "avif")        # sans choix (FORMATS_SORTIE = "auto"), un HEIC / HEIF donne ces trois fichiers
 JPEG_OUT = ("heic", "jxl", "avif")       # un JPEG donne ceux-là
-CANON = ("jpg", "heic", "jxl", "avif")   # ordre de traitement et d'affichage des formats choisis
-SAME_FORMAT = {"heic": "heic", "jpeg": "jpg"}    # type de source -> sortie de même format (recompression : sur confirmation)
+PNG_OUT = ("jpg", "heic", "jxl", "avif") # un PNG donne ceux-là (le png de sortie n'est jamais un défaut : opt-in avec -f)
+DEFAULT_OUT = {"heic": HEIC_OUT, "jpeg": JPEG_OUT, "png": PNG_OUT}
+CANON = ("jpg", "heic", "jxl", "avif", "png")   # ordre de traitement et d'affichage des formats choisis
+SAME_FORMAT = {"heic": "heic", "jpeg": "jpg", "png": "png"}    # type de source -> sortie de même format (recompression : sur confirmation)
 _NAMES = {"jpg": "jpg", "jpeg": "jpg", "jpe": "jpg", "jfif": "jpg", "heic": "heic", "heif": "heic",
-          "jxl": "jxl", "jpegxl": "jxl", "avif": "avif", "avi": "avif"}
+          "jxl": "jxl", "jpegxl": "jxl", "avif": "avif", "avi": "avif", "png": "png"}
 
 
 def parse_formats(text):
     """Liste de formats de sortie saisie par l'utilisateur -> (formats rangés dans l'ordre CANON ou None pour « auto », avis).
-    Séparateurs : virgule, espace, point-virgule, « + ». Noms acceptés : heic (heif), jpg (jpeg), jxl, avif.
+    Séparateurs : virgule, espace, point-virgule, « + ». Noms acceptés : heic (heif), jpg (jpeg), jxl, avif, png.
     « avi » est lu comme « avif » (AVI est un format vidéo : avis affiché). ValueError (message français) si un nom est inconnu."""
     tokens = [t.lstrip(".") for t in re.split(r"[,;+\s]+", (text or "").strip().lower()) if t.strip(".")]
     if not tokens or tokens == ["auto"]:
@@ -266,16 +308,16 @@ def parse_formats(text):
         raise ValueError("« auto » ne se combine pas avec d'autres formats")
     bad = [t for t in tokens if t not in _NAMES]
     if bad:
-        raise ValueError("format inconnu : " + ", ".join(f"« {t} »" for t in bad) + " (possibles : heic, jpg, jxl, avif, ou auto)")
+        raise ValueError("format inconnu : " + ", ".join(f"« {t} »" for t in bad) + " (possibles : heic, jpg, jxl, avif, png, ou auto)")
     notices = ["« avi » lu comme « avif » (AVI est un format vidéo)"] if "avi" in tokens else []
     chosen = {_NAMES[t] for t in tokens}
     return tuple(e for e in CANON if e in chosen), notices
 
 
 def plan_outputs(label, selected):
-    """Formats à produire pour un type de source ('heic' | 'jpeg') : le choix de l'utilisateur, ou les trois formats par défaut."""
+    """Formats à produire pour un type de source ('heic' | 'jpeg' | 'png') : le choix de l'utilisateur, ou les formats par défaut."""
     if selected is None:
-        return tuple(HEIC_OUT if label == "heic" else JPEG_OUT)
+        return tuple(DEFAULT_OUT[label])
     return tuple(e for e in CANON if e in selected)
 
 
@@ -1046,18 +1088,18 @@ def jpeg_hdr_source(prim, blob, orient):
     return dict(payload=raw_iso, meta=meta, gain=gain)       # payload None : métadonnées XMP seules (voir _iso_payload)
 
 
-def _gray_to_rgb(im, icc, notes):
-    """Image « L » -> RGB ; un profil gris est converti en sRGB (sinon ignoré, avec une note)."""
+def _gray_to_rgb(im, icc, notes, what="JPEG"):
+    """Image « L » -> RGB ; un profil gris est converti en sRGB (sinon ignoré, avec une note). what : type de la source (pour les notes)."""
     if icc and icc[16:20] == b"GRAY" and ImageCms is not None:
         try:
             rgb = ImageCms.profileToProfile(im, ImageCms.ImageCmsProfile(BytesIO(icc)), ImageCms.createProfile("sRGB"),
                                             renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC, outputMode="RGB")
-            notes.append("JPEG en niveaux de gris avec profil gris : converti en sRGB")
+            notes.append(f"{what} en niveaux de gris avec profil gris : converti en sRGB")
             return rgb
         except Exception as e:
             notes.append(f"profil gris illisible ({type(e).__name__}) : ignoré")
     elif icc:
-        notes.append("profil ICC ignoré (JPEG en niveaux de gris)")
+        notes.append(f"profil ICC ignoré ({what} en niveaux de gris)")
     return im.convert("RGB")
 
 
@@ -1096,6 +1138,141 @@ def _prepare_jpeg(raw, im0, notes):
             notes.append(f"HDR illisible ({type(e).__name__}: {e}) -> sorties SDR")
             degraded = True
     return Ctx(im, hs, exif, icc, jpeg=prim, exif_orig=exif0), degraded
+
+
+# ----------------------------------------------------------------------------------------------
+# Entrée PNG : blocs lus dans les octets (Pillow n'expose ni la profondeur de bits réelle ni cICP), profondeur 16 bits via
+# imagecodecs (Pillow lirait un PNG RVB 16 bits en 8 bits sans le dire), transparence, orientation EXIF, profil ICC
+# ----------------------------------------------------------------------------------------------
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def _png_chunks(raw):
+    """[(type, début des données, longueur)] des blocs d'un PNG, jusqu'à IEND. Les CRC ne sont pas vérifiés ici (Pillow et libpng
+    le font au décodage)."""
+    if raw[:8] != PNG_SIGNATURE:
+        raise ValueError("signature PNG absente")
+    pos, out = 8, []
+    while pos + 12 <= len(raw):
+        n = int.from_bytes(raw[pos:pos + 4], "big")
+        typ = raw[pos + 4:pos + 8]
+        if pos + 12 + n > len(raw):
+            break
+        out.append((typ, pos + 8, n))
+        pos += 12 + n
+        if typ == b"IEND":
+            break
+    return out
+
+
+def _png_chunk(typ, payload):
+    return struct.pack(">I", len(payload)) + typ + payload + struct.pack(">I", zlib.crc32(typ + payload) & 0xFFFFFFFF)
+
+
+def _png_insert(png, blocks):
+    """PNG dont les blocs (formés par _png_chunk) sont insérés juste après IHDR, donc avant IDAT (cICP l'exige)."""
+    if png[:8] != PNG_SIGNATURE or png[12:16] != b"IHDR":
+        raise ValueError("PNG inattendu : en-tête IHDR absent")
+    end = 8 + 12 + 13
+    return png[:end] + b"".join(blocks) + png[end:]
+
+
+def _png_data(raw, chunks, typ):
+    """Données du premier bloc de ce type, ou None."""
+    return next((raw[s:s + n] for t, s, n in chunks if t == typ), None)
+
+
+def _u16_to_u8(a):
+    """16 -> 8 bits par arrondi de v / 257, par tranches de lignes (mémoire)."""
+    out = np.empty(a.shape, np.uint8)
+    for y in range(0, a.shape[0], 256):
+        out[y:y + 256] = (a[y:y + 256].astype(np.uint32) + 128) // 257
+    return out
+
+
+def _prepare_png(raw, im0, notes):
+    """(Ctx, dégradé) d'un PNG ouvert et chargé : RVB 8 bits orienté, EXIF à orientation 1, profil ICC. Une transparence est
+    aplatie sur PNG_FOND (Ctx.rgba garde le RVBA d'origine, pour une sortie PNG) ; 16 bits -> 8 bits ; APNG : image par défaut."""
+    degraded = False
+    chunks = _png_chunks(raw)
+    if not chunks or chunks[0][0] != b"IHDR" or chunks[0][2] != 13:
+        raise ValueError("PNG sans en-tête IHDR valide")
+    depth, ctype = raw[chunks[0][1] + 8], raw[chunks[0][1] + 9]
+    names = {t for t, _, _ in chunks}
+    icc, exif0 = im0.info.get("icc_profile"), im0.info.get("exif")
+    cicp = _png_data(raw, chunks, b"cICP")
+    if cicp is not None and len(cicp) == 4:
+        if cicp[1] in (16, 18):
+            raise ValueError(f"PNG HDR (cICP : primaires {cicp[0]}, transfert {cicp[1]} = {'PQ' if cicp[1] == 16 else 'HLG'}) "
+                             "non pris en charge : les couleurs seraient fausses")
+        if not icc and (cicp[0], cicp[1]) != (1, 13):
+            notes.append(f"étiquette couleur cICP (primaires {cicp[0]}, transfert {cicp[1]}) non gérée : traitée comme sRGB")
+            degraded = True
+    elif not icc and b"sRGB" not in names and b"gAMA" in names:
+        gama = _png_data(raw, chunks, b"gAMA")
+        if gama is not None and len(gama) == 4 and abs(int.from_bytes(gama, "big") / 100000 - 0.45455) > 0.02:
+            notes.append(f"balise gAMA ({int.from_bytes(gama, 'big') / 100000:.5f}) ignorée : image traitée comme sRGB")
+    if b"acTL" in names or getattr(im0, "is_animated", False):
+        notes.append("PNG animé (APNG) : seule l'image par défaut est convertie, l'animation est perdue")
+        degraded = True
+    if depth == 16:
+        if not HAS_PNG16:
+            raise ValueError(f"PNG 16 bits : imagecodecs (avec son codec PNG) et numpy sont nécessaires pour le lire "
+                             f"(Pillow le tronquerait à 8 bits) : {HDR_ENC_HINT}")
+        if ctype in (0, 2) and b"tRNS" in names:
+            raise ValueError("PNG 16 bits avec couleur transparente (bloc tRNS) : non pris en charge")
+        if raw[chunks[0][1] + 12] == 1:
+            notes.append("PNG 16 bits entrelacé : le message « Interlace handling should be turned on » de libpng, s'il s'affiche, "
+                         "n'a pas d'effet constaté sur les pixels")
+        a8 = _u16_to_u8(imagecodecs.png_decode(raw))
+        if a8.ndim == 2:
+            a8 = a8[..., None]
+        ch = a8.shape[2] if a8.ndim == 3 else 0
+        if ch not in (1, 2, 3, 4) or a8.shape[:2] != (im0.height, im0.width):
+            raise ValueError(f"décodage PNG 16 bits inattendu : {a8.shape}")
+        gray = ch in (1, 2)
+        base = Image.fromarray(np.ascontiguousarray(a8[..., 0] if gray else a8[..., :3]))
+        alpha = Image.fromarray(np.ascontiguousarray(a8[..., ch - 1])) if ch in (2, 4) else None
+        del a8
+        notes.append("source 16 bits par canal lue en 8 bits (arrondi) : 8 bits de précision perdus")
+        degraded = True
+    else:
+        mode, trans = im0.mode, im0.info.get("transparency")
+        if mode not in ("1", "L", "LA", "P", "RGB", "RGBA"):
+            raise ValueError(f"mode PNG {mode} non pris en charge")
+        gray = mode in ("1", "L", "LA")
+        want = "L" if gray else "RGB"
+        if mode == "P" and trans is not None:             # palette transparente : en passant par RVBA, Pillow n'avertit pas
+            rgba = im0.convert("RGBA")
+            base, alpha = rgba.convert("RGB"), rgba.getchannel("A")
+        else:
+            base = im0 if mode == want else im0.convert(want)
+            if "A" in mode:
+                alpha = im0.getchannel("A")
+            else:                                         # gris / RVB avec couleur transparente (tRNS), ou sans transparence
+                alpha = None if trans is None else im0.convert("RGBA").getchannel("A")
+    if alpha is not None and alpha.getextrema()[0] == 255:
+        alpha = None                                      # canal alpha présent mais entièrement opaque : rien à aplatir
+    if gray:
+        base, icc = _gray_to_rgb(base, icc, notes, "PNG"), None
+    exif = exif0
+    orient = _exif_orientation(exif0)
+    if orient != 1:
+        exif = _exif_orientation_to_1(exif0)              # les pixels sont tournés ci-dessous : l'étiquette doit valoir 1
+        if orient in _ORIENT_OPS:
+            base = base.transpose(_ORIENT_OPS[orient])
+            alpha = alpha.transpose(_ORIENT_OPS[orient]) if alpha is not None else None
+        else:
+            notes.append(f"orientation EXIF {orient} invalide : ignorée")
+    rgba = None
+    if alpha is not None:
+        rgba = Image.merge("RGBA", (*base.split(), alpha))
+        flat = Image.new("RGB", base.size, PNG_FOND)
+        flat.paste(base, mask=alpha)
+        base = flat
+    c = Ctx(base, None, exif, icc)
+    c.rgba = rgba
+    return c, degraded
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1247,6 +1424,7 @@ class Ctx:
         self.tiff = _tiff_exif(self.exif)
         self.kind = _icc_kind(self.icc)
         self.jpeg, self.exif_orig = jpeg, exif_orig      # JPEG d'entrée : octets de l'image principale et EXIF d'origine
+        self.rgba = None                                 # PNG d'entrée avec transparence : RVBA d'origine (self.im est alors aplatie)
         self.notes, self.degraded = [], False
         self._rgb8 = self._px = None
 
@@ -1660,12 +1838,66 @@ def sdr_jxl_jpeg(c):
     return lossy
 
 
+# --- PNG en sortie : sans perte (8 bits RVB, RVBA si la source PNG avait de la transparence), ou 16 bits Rec.2020 / PQ en HDR ---------
+def _check_png(d, c, ref):
+    """Relit un PNG produit : taille, mode, profil ICC, EXIF ; pixels IDENTIQUES à ref (le PNG est sans perte)."""
+    with Image.open(BytesIO(d)) as chk:
+        chk.load()
+        mode = chk.mode
+        if chk.format != "PNG" or chk.size != ref.size or mode != ref.mode:
+            raise ValueError(f"PNG relu : {chk.format} {chk.size} {mode} au lieu de PNG {ref.size} {ref.mode}")
+        if c.icc and chk.info.get("icc_profile") != c.icc:
+            raise ValueError("profil ICC absent ou altéré")
+        _check_exif(c.exif, chk.info.get("exif"))
+        _, mx = _diff(ref, chk)
+    if mx:
+        raise ValueError(f"PNG sans perte mais pixels relus différents de la source (écart max {mx} niveaux)")
+    return f"{mode} 8 bits, sans perte : pixels identiques"
+
+
+def sdr_png(c):
+    im = c.rgba if c.rgba is not None else c.im          # source PNG transparente : la transparence est gardée
+    buf = BytesIO()
+    im.save(buf, "PNG", compress_level=PNG_NIVEAU, **c.meta)
+    return buf.getvalue(), lambda d: _check_png(d, c, im)
+
+
+def _check_png_hdr(d, c):
+    chunks = _png_chunks(d)
+    if _png_data(d, chunks, b"cICP") != bytes((9, 16, 0, 1)):
+        raise ValueError("balise cICP absente ou différente de Rec.2020 (9) / PQ (16) / RVB (0) / plage complète (1)")
+    if (d[chunks[0][1] + 8], d[chunks[0][1] + 9]) != (16, 2):
+        raise ValueError("profondeur ou type de couleur PNG inattendus (attendu : RVB 16 bits)")
+    dec, ref = imagecodecs.png_decode(d), c.px["u16"]
+    if dec.dtype != np.uint16 or dec.shape != ref.shape:
+        raise ValueError(f"décodage inattendu : {dec.dtype} {dec.shape}")
+    if not np.array_equal(dec, ref):
+        raise ValueError("PNG 16 bits sans perte mais codes PQ relus différents")
+    if c.tiff and _png_data(d, chunks, b"eXIf") != c.tiff:
+        raise ValueError("EXIF absent ou altéré")
+    return "sans perte : codes PQ 16 bits identiques, RVB 16 bits, cICP Rec.2020 / PQ"
+
+
+def hdr_png(c):
+    if not PNG_HDR:
+        raise HdrOff("PNG_HDR = False : PNG écrit en SDR")
+    px = c.px                                                     # HdrSkip si imagecodecs / numpy absents
+    if not HAS_PNG16:
+        raise HdrSkip("imagecodecs sans codec PNG")
+    blocks = [_png_chunk(b"cICP", bytes((9, 16, 0, 1)))] + ([_png_chunk(b"eXIf", c.tiff)] if c.tiff else [])
+    return _png_insert(imagecodecs.png_encode(px["u16"], level=PNG_NIVEAU), blocks), lambda d: _check_png_hdr(d, c)
+
+
 # HEIC en entrée ; « heic » = même format que la source : recompression, produite seulement sur confirmation
-SDR_ROUTES = {"jpg": sdr_jpg, "heic": sdr_heic, "jxl": sdr_jxl, "avif": sdr_avif}
-HDR_ROUTES = {"jpg": hdr_jpg, "heic": hdr_heic, "jxl": hdr_jxl, "avif": hdr_avif}
+SDR_ROUTES = {"jpg": sdr_jpg, "heic": sdr_heic, "jxl": sdr_jxl, "avif": sdr_avif, "png": sdr_png}
+HDR_ROUTES = {"jpg": hdr_jpg, "heic": hdr_heic, "jxl": hdr_jxl, "avif": hdr_avif, "png": hdr_png}
 # JPEG en entrée ; « jpg » = même format que la source (recompression, sur confirmation)
-JPEG_SDR_ROUTES = {"heic": sdr_heic, "jpg": sdr_jpg, "jxl": sdr_jxl_jpeg, "avif": sdr_avif}
-JPEG_HDR_ROUTES = {"heic": hdr_heic, "jpg": hdr_jpg, "jxl": hdr_jxl, "avif": hdr_avif}
+JPEG_SDR_ROUTES = {"heic": sdr_heic, "jpg": sdr_jpg, "jxl": sdr_jxl_jpeg, "avif": sdr_avif, "png": sdr_png}
+JPEG_HDR_ROUTES = {"heic": hdr_heic, "jpg": hdr_jpg, "jxl": hdr_jxl, "avif": hdr_avif, "png": hdr_png}
+# PNG en entrée (jamais HDR : un PNG cICP PQ / HLG est refusé à la lecture) ; « png » = même format que la source
+PNG_SDR_ROUTES = {"jpg": sdr_jpg, "heic": sdr_heic, "jxl": sdr_jxl, "avif": sdr_avif, "png": sdr_png}
+PNG_HDR_ROUTES = {}
+ROUTES = {"heic": (SDR_ROUTES, HDR_ROUTES), "jpeg": (JPEG_SDR_ROUTES, JPEG_HDR_ROUTES), "png": (PNG_SDR_ROUTES, PNG_HDR_ROUTES)}
 
 
 def _make(route, c):
@@ -1674,14 +1906,16 @@ def _make(route, c):
 
 
 def _sniff(src):
-    """Type d'un fichier d'après son CONTENU (pas son extension) : 'heic' ou 'jpeg'."""
+    """Type d'un fichier d'après son CONTENU (pas son extension) : 'heic', 'jpeg' ou 'png'."""
     with Image.open(src) as im:
         fmt = im.format
     if fmt == "HEIF":
         return "heic"
     if fmt in ("JPEG", "MPO"):
         return "jpeg"
-    raise ValueError(f"format {fmt} non pris en charge (HEIC / HEIF et JPEG seulement)")
+    if fmt == "PNG":
+        return "png"
+    raise ValueError(f"format {fmt} non pris en charge (HEIC / HEIF, JPEG et PNG seulement)")
 
 
 def _prepare_heic(src, im0, notes):
@@ -1718,10 +1952,13 @@ def _prepare_heic(src, im0, notes):
 
 def _write_outputs(c, label, out, stem, errors, details, done, src=None, wanted=None):
     """Fabrique, contrôle puis écrit chaque format de sortie. wanted : formats à produire (par défaut HEIC en entrée : jpg, jxl,
-    avif ; JPEG : heic, jxl, avif). Un format identique à celui de la source (recompression) n'y figure qu'après confirmation."""
-    exts = wanted if wanted is not None else (HEIC_OUT if label == "heic" else JPEG_OUT)
-    sdr_routes = SDR_ROUTES if label == "heic" else JPEG_SDR_ROUTES
-    hdr_routes = HDR_ROUTES if label == "heic" else JPEG_HDR_ROUTES
+    avif ; JPEG : heic, jxl, avif ; PNG : jpg, heic, jxl, avif). Un format identique à celui de la source (recompression)
+    n'y figure qu'après confirmation."""
+    exts = wanted if wanted is not None else DEFAULT_OUT[label]
+    sdr_routes, hdr_routes = ROUTES[label]
+    flattened = [e for e in exts if e in FORMATS and e != "png"]
+    if c.rgba is not None and flattened:
+        c.warn(f"transparence aplatie sur le fond RVB {PNG_FOND} (non conservée en {', '.join(flattened)}) ; le png la garde")
     for ext in exts:
         if ext not in FORMATS:
             continue
@@ -1762,18 +1999,19 @@ def _write_outputs(c, label, out, stem, errors, details, done, src=None, wanted=
 
 
 # ----------------------------------------------------------------------------------------------
-def _plain_error(e):
+def _plain_error(e, label="?"):
     """Message lisible pour les erreurs de lecture les plus courantes (les textes de Pillow sont en anglais)."""
     if type(e).__name__ == "UnidentifiedImageError":
-        return "fichier illisible : ni HEIC ni JPEG valide (corrompu, ou autre format)"
+        return "fichier illisible : ni HEIC, ni JPEG, ni PNG valide (corrompu, ou autre format)"
     if isinstance(e, OSError) and "truncated" in str(e):
-        return "fichier JPEG incomplet (tronqué) : lecture refusée plutôt que d'écrire une image à moitié décodée"
+        return (f"fichier {'PNG' if label == 'png' else 'JPEG'} incomplet (tronqué) : "
+                "lecture refusée plutôt que d'écrire une image à moitié décodée")
     return f"{type(e).__name__}: {e}"
 
 
 def convert(job):
-    """Renvoie (nom, erreur | None, type 'HDR'/'SDR', formats HDR produits, notes, dégradé, détails par format, source 'heic'/'jpeg').
-    job = (fichier, dossier de sortie, nom de base[, formats à produire]) ; sans le 4e élément : les trois formats par défaut."""
+    """Renvoie (nom, erreur | None, type 'HDR'/'SDR', formats HDR produits, notes, dégradé, détails par format, source 'heic'/'jpeg'/'png').
+    job = (fichier, dossier de sortie, nom de base[, formats à produire]) ; sans le 4e élément : les formats par défaut de la source."""
     src, out, stem, *rest = job
     wanted = rest[0] if rest else None
     done, notes, details, errors, degraded, label = [], [], [], [], False, "?"
@@ -1788,13 +2026,13 @@ def convert(job):
             raw = Path(src).read_bytes()
             with Image.open(BytesIO(raw)) as im0:
                 im0.load()
-                c, degraded = _prepare_jpeg(raw, im0, notes)
+                c, degraded = (_prepare_png if label == "png" else _prepare_jpeg)(raw, im0, notes)
                 _write_outputs(c, label, out, stem, errors, details, done, src, wanted)
         notes += c.notes
         degraded = degraded or c.degraded
         return (src.name, "; ".join(errors) or None, "HDR" if c.hs is not None else "SDR", done, notes, degraded, details, label)
     except Exception as e:  # un fichier en échec n'arrête pas les autres
-        return src.name, _plain_error(e), "?", done, notes, degraded, details, label
+        return src.name, _plain_error(e, label), "?", done, notes, degraded, details, label
 
 
 def _mem_available_mb():
@@ -1825,7 +2063,7 @@ def _mem_available_mb():
 
 def _preset_summary(label="heic", exts=None):
     """Une ligne qui décrit les réglages effectifs, pour un type de source et les formats de sortie demandés (par défaut :
-    HEIC -> jpg, jxl, avif ; JPEG -> heic, jxl, avif)."""
+    HEIC -> jpg, jxl, avif ; JPEG -> heic, jxl, avif ; PNG -> jpg, heic, jxl, avif)."""
     def jxl(d):
         return "sans perte" if d is None else f"distance {d:g}"
 
@@ -1842,9 +2080,9 @@ def _preset_summary(label="heic", exts=None):
     def both(sdr, hdr):
         return sdr if sdr == hdr else f"SDR {sdr} / HDR {hdr}"
 
-    exts = exts or (HEIC_OUT if label == "heic" else JPEG_OUT)
+    exts = exts or DEFAULT_OUT[label]
     s, h = P["jxl_sdr_distance"], P["jxl_hdr_distance"]
-    if label == "heic" or P["jxl_jpeg"] == "pixels":
+    if label != "jpeg" or P["jxl_jpeg"] == "pixels":
         jx = both(jxl(s), jxl(h))
     elif P["jxl_jpeg"] == "transcode":
         jx = f"SDR transcodage sans perte du JPEG / HDR {jxl(h)}"
@@ -1852,7 +2090,8 @@ def _preset_summary(label="heic", exts=None):
         jx = f"SDR transcodage sans perte, ou {jxl(s)} s'il est {JXL_LOSSY_MIN_SAVING:.0%} plus petit / HDR {jxl(h)}"
     sub = "4:4:4" if P["jpg"].get("subsampling") == 0 else "4:2:0"
     parts = {"jpg": f"jpg q{P['jpg']['quality']} {sub}", "heic": "heic " + both(heic("sdr"), heic("hdr")),
-             "jxl": "jxl " + jx, "avif": "avif " + both(avif("sdr"), avif("hdr"))}
+             "jxl": "jxl " + jx, "avif": "avif " + both(avif("sdr"), avif("hdr")),
+             "png": f"png sans perte (compression {PNG_NIVEAU}" + (", HDR : 16 bits Rec.2020 / PQ" if PNG_HDR and HDR else "") + ")"}
     return ", ".join(parts[e] for e in exts)
 
 
@@ -1877,6 +2116,7 @@ def _workers(files):
 
 HEIC_EXT = (".heic", ".heif")
 JPEG_EXT = (".jpg", ".jpeg", ".jpe", ".jfif")
+PNG_EXT = (".png",)
 
 
 def _output_stems(files):
@@ -1902,18 +2142,20 @@ def _output_stems(files):
 
 USAGE = r"""Usage : python heic_jpeg_convert.py ["<dossier_source>" ["<dossier_sortie>"]] [-f formats] [-y]
 
-  -f, --formats LISTE  formats de sortie : un ou plusieurs de heic, jpg, jxl, avif, séparés par des virgules (défaut : auto)
-                         auto : HEIC -> jpg, jxl, avif ; JPEG -> heic, jxl, avif
-                       Un format identique à celui de la source (heic pour un HEIC, jpg pour un JPEG) est une RECOMPRESSION,
-                       pas une copie : une confirmation est demandée avant de convertir.
+  -f, --formats LISTE  formats de sortie : un ou plusieurs de heic, jpg, jxl, avif, png, séparés par des virgules (défaut : auto)
+                         auto : HEIC -> jpg, jxl, avif ; JPEG -> heic, jxl, avif ; PNG -> jpg, heic, jxl, avif
+                         (png n'est jamais produit par défaut : à demander avec -f png)
+                       Un format identique à celui de la source (heic pour un HEIC, jpg pour un JPEG, png pour un PNG) est une
+                       RECOMPRESSION, pas une copie : une confirmation est demandée avant de convertir.
   -y, --yes, --oui     répond « oui » d'avance à cette confirmation (sans clavier : tâche planifiée, redirection)
   -h, --help, --aide   affiche ce message
 
 Exemples :
   python heic_jpeg_convert.py "D:\Photos"                     tous les formats par défaut
   python heic_jpeg_convert.py "D:\Photos" -f jxl              JPEG XL seulement
-  python heic_jpeg_convert.py "D:\Photos" -f heic,avif        HEIC (JPEG en entrée) et AVIF
-  python heic_jpeg_convert.py "D:\Photos" -f jpg -y           HEIC -> JPG ; JPEG -> JPG recompressé, confirmé d'avance"""
+  python heic_jpeg_convert.py "D:\Photos" -f heic,avif        HEIC (JPEG et PNG en entrée) et AVIF
+  python heic_jpeg_convert.py "D:\Photos" -f png              PNG (HEIC et JPEG en entrée ; PNG -> PNG recompressé, confirmé avant)
+  python heic_jpeg_convert.py "D:\Photos" -f jpg -y           HEIC, PNG -> JPG ; JPEG -> JPG recompressé, confirmé d'avance"""
 
 
 def _parse_argv(argv):
@@ -1948,7 +2190,15 @@ def _same_format_warning(label, n):
     """Texte de la confirmation demandée quand la sortie demandée a le format de la source."""
     ext = SAME_FORMAT[label]
     name = ext.upper()
-    if ext == "heic":
+    lossy_src = "La source est déjà compressée avec perte, rien ne la restaure. "
+    if ext == "png":
+        how = f"PNG 8 bits sans perte, compression {PNG_NIVEAU}"
+        lossy_src = ""
+        loss = ("La source est sans perte : une source 8 bits garde ses pixels à l'identique (relus et comparés). Changent : 16 bits -> "
+                "8 bits, palette -> RVB, canal alpha entièrement opaque -> supprimé, animation -> image par défaut ; "
+                "texte, XMP et résolution ne sont pas conservés.")
+        hdr = "Un PNG HDR (cICP PQ / HLG) n'est pas lu : il est refusé."
+    elif ext == "heic":
         q, chroma = _heic_params("sdr")
         how = f"HEVC {'sans perte' if q == -1 else 'q' + str(q)}, {_chroma_txt(chroma)}"
         loss = ("Le codage lui-même n'ajoute pas de perte (écart max 1 niveau mesuré), mais le fichier est plusieurs fois plus gros que la source."
@@ -1960,7 +2210,7 @@ def _same_format_warning(label, n):
         hdr = "Un JPEG Ultra HDR garde sa carte de gain (recompressée) ; XMP, IPTC et commentaires ne sont pas conservés."
     return (f"\nFormat identique à la source : {n} fichier(s) {name} -> {name}.\n"
             f"  Ce n'est pas une copie : les pixels sont décodés puis recompressés ({how}).\n"
-            f"  La source est déjà compressée avec perte, rien ne la restaure. {loss}\n"
+            f"  {lossy_src}{loss}\n"
             f"  {hdr}")
 
 
@@ -1989,12 +2239,13 @@ def _confirm_same_format(label, n, yes):
 
 
 def _kind(path):
-    """Type d'un fichier d'après son contenu ('heic' | 'jpeg'), sinon d'après son extension (le fichier illisible sera signalé
-    par la conversion elle-même)."""
+    """Type d'un fichier d'après son contenu ('heic' | 'jpeg' | 'png'), sinon d'après son extension (le fichier illisible sera
+    signalé par la conversion elle-même)."""
     try:
         return _sniff(path)
     except Exception:
-        return "heic" if path.suffix.lower() in HEIC_EXT else "jpeg"
+        ext = path.suffix.lower()
+        return "heic" if ext in HEIC_EXT else "png" if ext in PNG_EXT else "jpeg"
 
 
 if __name__ == "__main__":
@@ -2018,16 +2269,17 @@ if __name__ == "__main__":
         sys.exit(2)
     for n in notices:
         print("NOTE :", n)
-    files = sorted((p for p in src_dir.iterdir() if p.is_file() and p.suffix.lower() in HEIC_EXT + JPEG_EXT),
+    files = sorted((p for p in src_dir.iterdir() if p.is_file() and p.suffix.lower() in HEIC_EXT + JPEG_EXT + PNG_EXT),
                    key=lambda p: p.name.lower())
     if not files:
-        print(f"Aucun fichier HEIC / HEIF / JPEG dans {src_dir}")
+        print(f"Aucun fichier HEIC / HEIF / JPEG / PNG dans {src_dir}")
         sys.exit(1)
     kind_of = {p: _kind(p) for p in files}
-    by_type = {lab: [p for p in files if kind_of[p] == lab] for lab in ("heic", "jpeg")}
-    names = {"heic": "HEIC", "jpeg": "JPEG"}
+    labels = ("heic", "jpeg", "png")
+    by_type = {lab: [p for p in files if kind_of[p] == lab] for lab in labels}
+    names = {"heic": "HEIC", "jpeg": "JPEG", "png": "PNG"}
     plans, skipped, impossible = {}, {}, False
-    for label in ("heic", "jpeg"):
+    for label in labels:
         if not by_type[label]:
             continue
         exts = list(plan_outputs(label, selected))
@@ -2057,13 +2309,13 @@ if __name__ == "__main__":
         sys.exit(1 if impossible else 0)
     workers, why = _workers(todo)
     print(f"Fidélité « {FIDELITE} » ; {workers} processus ({why})")
-    for label in ("heic", "jpeg"):
+    for label in labels:
         if plans.get(label):
             print(f"  {names[label]} ({len(by_type[label])}) : {_preset_summary(label, plans[label])}")
         elif by_type[label]:
             print(f"  {names[label]} ({len(by_type[label])}) : ignorés (aucun format de sortie retenu)")
     failed = degraded_n = n_hdr = 0
-    heic_hdr_written = False
+    heic_hdr_written = png_hdr_written = False
     jobs = [(f, out_dir, stems[f], plans[kind_of[f]]) for f in todo]
     with ProcessPoolExecutor(max_workers=workers) as pool:
         for name, err, kind, done, notes, degraded, details, label in pool.map(convert, jobs):
@@ -2075,9 +2327,10 @@ if __name__ == "__main__":
                 print("        ->", n)
             failed += err is not None
             degraded_n += degraded
-            n_hdr += kind == "HDR" and not degraded
+            n_hdr += kind == "HDR" and not degraded and {e for e in plans.get(label, ()) if e in FORMATS} <= set(done)   # HDR dans TOUS les formats demandés
             heic_hdr_written |= "heic" in done
-    parts = [f"{names[lab]} -> " + ", ".join(e for e in plans[lab] if e in FORMATS) for lab in ("heic", "jpeg") if plans.get(lab)]
+            png_hdr_written |= "png" in done
+    parts = [f"{names[lab]} -> " + ", ".join(e for e in plans[lab] if e in FORMATS) for lab in labels if plans.get(lab)]
     print(f"{len(todo) - failed}/{len(todo)} fichier(s) convertis et vérifiés ({' ; '.join(parts)}) -> {out_dir}")
     if len(todo) < len(files):
         print(f"{len(files) - len(todo)} fichier(s) ignorés : " + "; ".join(
@@ -2088,4 +2341,7 @@ if __name__ == "__main__":
     if heic_hdr_written:
         print("NOTE : un HEIC HDR écrit par ce programme est du HEVC 10 bits Rec.2020 / PQ (HDR10). Affichage en HDR constaté sur un\n"
               "       iPhone (un seul appareil) ; non vérifié sur macOS / Windows : s'il est faux, mettre HEIC_HDR = False (HEIC SDR).")
+    if png_hdr_written:
+        print("NOTE : un PNG HDR écrit par ce programme est un PNG 16 bits Rec.2020 / PQ (balise cICP). Affichage en HDR constaté\n"
+              "       sur un iPhone (app Photos, un seul appareil), non vérifié ailleurs ; un lecteur qui ignore cICP affiche des couleurs fausses : mettre alors PNG_HDR = False.")
     sys.exit(1 if failed or missing or degraded_n or impossible else 0)

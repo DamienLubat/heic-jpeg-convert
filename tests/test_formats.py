@@ -24,16 +24,28 @@ def test_auto(lossy, value):
     assert lossy.parse_formats(value)[0] is None
 
 
-@pytest.mark.parametrize("bad, fragment", [("png", "inconnu"), ("heic,gif", "gif"), ("auto,heic", "auto")])
+@pytest.mark.parametrize("bad, fragment", [("gif", "inconnu"), ("heic,gif", "gif"), ("auto,heic", "auto")])
 def test_invalid_format(lossy, bad, fragment):
     with pytest.raises(ValueError, match=fragment):
         lossy.parse_formats(bad)
 
 
+def test_png_is_a_format(lossy):
+    assert lossy.parse_formats("png") == (("png",), [])
+    assert lossy.parse_formats("PNG avif .jpg")[0] == ("jpg", "avif", "png")          # ordre canonique : png en dernier
+    assert lossy.parse_formats("heic, jxl, png")[0] == ("heic", "jxl", "png")
+
+
 def test_default_plans(lossy):
     assert lossy.plan_outputs("heic", None) == ("jpg", "jxl", "avif")
     assert lossy.plan_outputs("jpeg", None) == ("heic", "jxl", "avif")
-    assert lossy.SAME_FORMAT == {"heic": "heic", "jpeg": "jpg"}
+    assert lossy.plan_outputs("png", None) == ("jpg", "heic", "jxl", "avif")        # le png de sortie n'est jamais un défaut
+    assert lossy.SAME_FORMAT == {"heic": "heic", "jpeg": "jpg", "png": "png"}
+
+
+@pytest.mark.parametrize("label", ["heic", "jpeg", "png"])
+def test_chosen_formats_apply_to_every_source_type(lossy, label):
+    assert lossy.plan_outputs(label, ("jxl", "png")) == ("jxl", "png")
 
 
 def test_argv(lossy):

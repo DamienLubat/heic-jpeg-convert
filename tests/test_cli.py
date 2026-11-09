@@ -19,6 +19,8 @@ def folder(tmp_path, *names):
     for n in names:
         if n.endswith(".heic"):
             small.save(d / n, "HEIF", quality=70)
+        elif n.endswith(".png"):
+            small.save(d / n, "PNG")
         else:
             small.save(d / n, "JPEG", quality=90)
     return d
@@ -52,7 +54,7 @@ def test_help():
 
 def test_unknown_format_is_refused_before_any_work(tmp_path):
     d = folder(tmp_path, "a.heic", "b.jpg")
-    rc, out = cli([d, "-f", "png"])
+    rc, out = cli([d, "-f", "gif"])
     assert rc == 2 and "inconnu" in out and not (d / "converti").exists()
 
 
@@ -118,3 +120,46 @@ def test_formats_setting_in_the_program(tmp_path):
     d = folder(tmp_path, "s.heic")
     p = subprocess.run([sys.executable, str(patched), str(d)], stdin=subprocess.DEVNULL, capture_output=True, timeout=600)
     assert p.returncode == 0 and sorted(x.name for x in (d / "converti").iterdir()) == ["avif"]
+
+
+def test_png_sources_get_the_four_other_formats_by_default(tmp_path):
+    d = folder(tmp_path, "a.png")
+    rc, out = cli([d])
+    assert rc == 0 and "[o/N]" not in out and "PNG (1)" in out
+    for ext in ("jpg", "heic", "jxl", "avif"):
+        assert listing(d, ext) == [f"a.{ext}"]
+    assert listing(d, "png") == []
+
+
+def test_png_output_is_asked_with_f_and_png_to_png_needs_confirmation(tmp_path):
+    d = folder(tmp_path, "a.png", "b.jpg", "c.heic")
+    rc, out = cli([d, "-f", "png"])                                # sans clavier ni --yes : PNG -> PNG ignoré, code 1
+    assert rc == 1 and listing(d, "png") == ["b.png", "c.png"] and "IGNORÉES" in out and "PNG -> PNG" in out
+    rc, out = cli([d, "-f", "png", "-y"])
+    assert rc == 0 and listing(d, "png") == ["a.png", "b.png", "c.png"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="pty indisponible sous Windows")
+def test_png_to_png_confirmation_defaults_to_no(tmp_path):
+    d = folder(tmp_path, "a.png", "b.jpg")
+    rc, out = cli([d, "-f", "png"], ["\n"])                        # Entrée = non
+    assert rc == 0 and listing(d, "png") == ["b.png"] and "[o/N]" in out
+
+
+def test_folder_without_supported_file(tmp_path):
+    d = tmp_path / "empty"
+    d.mkdir()
+    (d / "note.txt").write_text("x")
+    rc, out = cli([d])
+    assert rc == 1 and "HEIC / HEIF / JPEG / PNG" in out
+
+
+def test_hdr_summary_does_not_claim_hdr_for_an_sdr_png(tmp_path):
+    from conftest import load_program, make_ultrahdr
+    d = tmp_path / "src"
+    d.mkdir()
+    make_ultrahdr(load_program("Lossy"), d / "u.jpg")
+    rc, out = cli([d, "-f", "png"])                                # PNG_HDR = False : le PNG est SDR
+    assert rc == 0 and "HDR conservé dans tous les formats demandés : 0 fichier(s)" in out and "PNG_HDR = False" in out
+    rc, out = cli([d, "-f", "avif"])
+    assert rc == 0 and "HDR conservé dans tous les formats demandés : 1 fichier(s)" in out
