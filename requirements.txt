@@ -1,0 +1,5 @@
+# Versions avec lesquelles le programme a été testé (voir README.md, « Versions testées »).
+pillow>=11.1.0
+pillow-heif>=1.8.1
+numpy>=2.5.4
+imagecodecs>=2026.10.10

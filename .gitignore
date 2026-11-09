@@ -1,0 +1,26 @@
+# Sorties du programme et photos : ne jamais publier de photo (EXIF, position GPS)
+converti/
+*.heic
+*.heif
+*.jpg
+*.jpeg
+*.jpe
+*.jfif
+*.jxl
+*.avif
+*.png
+*.tif
+*.tiff
+*.dng
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Système
+.DS_Store
+Thumbs.db
+desktop.ini

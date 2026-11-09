@@ -1,0 +1,3 @@
+# Facultatif : relecture supplémentaire de l'étiquette couleur des JXL SDR, et encodeur JXL de repli sans imagecodecs.
+# Licence GPL-3.0-or-later (voir README.md, « Licences des dépendances »). Les sorties JXL / AVIF sont identiques avec ou sans.
+pillow-jxl-plugin>=1.3.8
